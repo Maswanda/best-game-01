@@ -34,13 +34,14 @@ export function makeShard(x, y, w, h) {
   };
 }
 
-export function makeWisp(x, y, wave, scale) {
+export function makeWisp(x, y, wave, scale, type = 'chaser') {
   const speed = Math.min(
     CONFIG.wispMaxSpeed,
     CONFIG.wispBaseSpeed + (wave - 1) * CONFIG.wispSpeedPerWave,
   );
-  return {
+  const w = {
     kind: 'wisp',
+    type, // 'chaser' | 'dasher' | 'splitter' | 'tank' | 'mini'
     x, y,
     vx: 0, vy: 0,
     r: CONFIG.wispRadius * (0.9 + Math.random() * 0.35),
@@ -48,7 +49,71 @@ export function makeWisp(x, y, wave, scale) {
     heading: Math.random() * Math.PI * 2,
     wobble: Math.random() * Math.PI * 2,
     phase: Math.random() * Math.PI * 2,
+    hp: 1,
+    mode: 'drift', // dashers cycle drift -> windup -> charge -> recover
+    modeT: 1.2 + Math.random() * 1.2,
+    tx: 0, ty: 0, // charge target, set when the wind-up ends
   };
+  if (type === 'mini') {
+    w.r = CONFIG.miniRadius * scale;
+    w.speed = speed * 0.9 * scale;
+  } else if (type === 'tank') {
+    w.r = CONFIG.tankRadius * scale;
+    w.speed = speed * CONFIG.tankSpeedMul * scale;
+    w.hp = CONFIG.tankHp;
+  } else if (type === 'dasher') {
+    w.r = CONFIG.wispRadius * 0.85 * scale;
+    w.speed = speed * 1.1 * scale;
+  } else if (type === 'splitter') {
+    w.r = CONFIG.wispRadius * 1.15 * scale;
+    w.speed = speed * 0.9 * scale;
+  }
+  return w;
+}
+
+// A boss: one big shadow with a health pool, attack cycle and readable
+// tells. kind is 'warden' (wave 5) or 'sovereign' (wave 10).
+export function makeBoss(x, y, kind, scale) {
+  const isWarden = kind === 'warden';
+  return {
+    kind: 'boss',
+    type: kind,
+    x, y,
+    vx: 0, vy: 0,
+    r: (isWarden ? CONFIG.wardenRadius : CONFIG.sovereignRadius) * scale,
+    speed: (isWarden ? CONFIG.wardenSpeed : CONFIG.sovereignSpeed) * scale,
+    hp: isWarden ? CONFIG.wardenHp : CONFIG.sovereignHp,
+    maxHp: isWarden ? CONFIG.wardenHp : CONFIG.sovereignHp,
+    hurtT: 0,              // seconds it ignores further hits
+    mode: 'chase',         // chase | telegraph | charging | recover
+    modeT: 1.2,
+    atkT: 2.2,             // seconds until the next special attack
+    atkStep: 0,            // rotation through charge / orbs / summon
+    wobble: Math.random() * Math.PI * 2,
+    phase: Math.random() * Math.PI * 2,
+    tx: 0, ty: 0,          // charge target
+  };
+}
+
+// A shadow orb: a slow straight shot from the boss. Dodgeable, and a dash
+// through it destroys it.
+export function makeOrb(x, y, angle, scale) {
+  const sp = CONFIG.orbSpeed * scale;
+  return {
+    kind: 'orb',
+    x, y,
+    vx: Math.cos(angle) * sp,
+    vy: Math.sin(angle) * sp,
+    r: CONFIG.orbRadius * scale,
+    age: 0,
+    life: CONFIG.orbLife,
+    phase: Math.random() * Math.PI * 2,
+  };
+}
+
+// An expanding shockwave ring, drawn once and gone.
+export function makeRing(x, y, maxR, color) {
+  return { kind: 'ring', x, y, r: 6, maxR, color, age: 0, life: CONFIG.ringLife };
 }
 
 export function makePowerUp(x, y, type) {

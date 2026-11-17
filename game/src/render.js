@@ -12,6 +12,19 @@ const PALETTE = {
   shard: '#ffd166',
   wisp: '#ff5d8f',
   wispCore: '#c9184a',
+  dasher: '#ff9f1c',
+  dasherCore: '#cc5800',
+  splitter: '#c77dff',
+  splitterCore: '#7b2cbf',
+  tank: '#8d99ae',
+  tankCore: '#5a189a',
+  mini: '#ff8fab',
+  boss: '#e5383b',
+  bossCore: '#6a040f',
+  bossGold: '#ffd166',
+  orb: '#b388ff',
+  life: '#7dff9e',
+  nova: '#ffffff',
   shield: '#7dd7ff',
   magnet: '#ffd166',
   slow: '#b388ff',
@@ -97,9 +110,18 @@ export class Renderer {
     for (const p of world.powerups) this._powerup(p, world);
     for (const sh of world.shards) this._shard(sh, world);
     for (const w of world.wisps) this._wisp(w, world);
+    for (const o of world.orbs) this._orb(o);
+    if (world.boss) this._boss(world.boss, world);
     this._mote(world);
     for (const p of world.particles) this._particle(p);
+    for (const r of world.rings) this._ring(r);
     for (const f of world.floats) this._floatText(f);
+    if (world.flash > 0) {
+      ctx.globalAlpha = Math.min(0.55, world.flash * 0.9);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, world.w, world.h);
+      ctx.globalAlpha = 1;
+    }
   }
 
   _glow(x, y, r, color, alpha = 0.8) {
@@ -141,16 +163,47 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
-  _wisp(w) {
+  _wisp(w, world) {
     const { ctx } = this;
     const pulse = 1 + Math.sin(w.phase) * 0.12;
-    this._glow(w.x, w.y, w.r * 3.4 * pulse, 'rgba(255,93,143,0.5)');
+    // Each type reads differently at a glance: orange for the dasher,
+    // violet for the splitter, steel armour for the tank.
+    const body = w.type === 'dasher' ? PALETTE.dasher
+      : w.type === 'splitter' ? PALETTE.splitter
+      : w.type === 'tank' ? PALETTE.tank
+      : w.type === 'mini' ? PALETTE.mini : PALETTE.wisp;
+    const core = w.type === 'dasher' ? PALETTE.dasherCore
+      : w.type === 'splitter' ? PALETTE.splitterCore
+      : w.type === 'tank' ? PALETTE.tankCore : PALETTE.wispCore;
+    const glow = w.type === 'dasher' ? 'rgba(255,159,28,0.5)'
+      : w.type === 'splitter' ? 'rgba(199,125,255,0.5)'
+      : w.type === 'tank' ? 'rgba(141,153,174,0.5)'
+      : 'rgba(255,93,143,0.5)';
+
+    // A dasher about to charge flashes and shows its aim line, so the
+    // burst is always dodgeable.
+    if (w.type === 'dasher' && w.mode === 'windup') {
+      const m = world.mote;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,159,28,0.45)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(w.x, w.y);
+      ctx.lineTo(m.x, m.y);
+      ctx.stroke();
+      ctx.restore();
+      if (Math.floor(world.time * 16) % 2 === 0) {
+        this._glow(w.x, w.y, w.r * 5, 'rgba(255,255,255,0.7)');
+      }
+    }
+    this._glow(w.x, w.y, w.r * 3.4 * pulse, glow);
     ctx.save();
     ctx.translate(w.x, w.y);
     // Spiky shadow blob.
-    ctx.fillStyle = PALETTE.wisp;
+    ctx.fillStyle = body;
     ctx.beginPath();
-    const spikes = 8;
+    const spikes = w.type === 'tank' ? 6 : 8;
     for (let i = 0; i <= spikes * 2; i++) {
       const a = (i / (spikes * 2)) * Math.PI * 2;
       const rr = (i % 2 === 0 ? w.r : w.r * 0.62) * pulse;
@@ -160,26 +213,174 @@ export class Renderer {
     }
     ctx.closePath();
     ctx.fill();
+    // Tanks wear a cracked armour ring; each dash hit cracks it more.
+    if (w.type === 'tank') {
+      ctx.strokeStyle = w.hp > 1 ? 'rgba(234,252,255,0.9)' : 'rgba(234,252,255,0.35)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, w.r * 0.82, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // A splitter carries two little cores inside, hinting it breaks apart.
+    if (w.type === 'splitter') {
+      ctx.fillStyle = core;
+      ctx.beginPath(); ctx.arc(-w.r * 0.32, w.r * 0.3, w.r * 0.22, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(w.r * 0.32, w.r * 0.3, w.r * 0.22, 0, Math.PI * 2); ctx.fill();
+    }
     // Eyes.
     ctx.fillStyle = '#fff';
     const ex = w.r * 0.32;
     const ey = -w.r * 0.12;
     ctx.beginPath(); ctx.arc(-ex, ey, w.r * 0.2, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(ex, ey, w.r * 0.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = PALETTE.wispCore;
+    ctx.fillStyle = core;
     ctx.beginPath(); ctx.arc(-ex, ey, w.r * 0.1, 0, Math.PI * 2); ctx.fill();
     ctx.beginPath(); ctx.arc(ex, ey, w.r * 0.1, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
 
+  // A shadow orb: a small dark shot with a violet rim.
+  _orb(o) {
+    const { ctx } = this;
+    const pulse = 1 + Math.sin(o.phase) * 0.15;
+    this._glow(o.x, o.y, o.r * 3 * pulse, 'rgba(179,136,255,0.55)');
+    ctx.fillStyle = '#2d1b4e';
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = PALETTE.orb;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#e0aaff';
+    ctx.beginPath();
+    ctx.arc(o.x, o.y, o.r * 0.35 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // A boss: a huge spiky shadow with horns, a crown for the Sovereign,
+  // and a flash whenever it takes a hit or telegraphs a charge.
+  _boss(b, world) {
+    const { ctx } = this;
+    const pulse = 1 + Math.sin(b.phase) * 0.08;
+    const isSovereign = b.type === 'sovereign';
+    const telegraphing = b.mode === 'telegraph';
+    if (telegraphing) {
+      const m = world.mote;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,93,143,0.5)';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 10]);
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(m.x, m.y);
+      ctx.stroke();
+      ctx.restore();
+      if (Math.floor(world.time * 16) % 2 === 0) {
+        this._glow(b.x, b.y, b.r * 4, 'rgba(255,255,255,0.55)');
+      }
+    }
+    this._glow(b.x, b.y, b.r * 3.2 * pulse, telegraphing ? 'rgba(255,93,143,0.75)' : 'rgba(229,56,59,0.5)');
+    ctx.save();
+    ctx.translate(b.x, b.y);
+    // Horns.
+    ctx.fillStyle = PALETTE.bossCore;
+    ctx.beginPath();
+    ctx.moveTo(-b.r * 0.7, -b.r * 0.55);
+    ctx.lineTo(-b.r * 1.05, -b.r * 1.25);
+    ctx.lineTo(-b.r * 0.3, -b.r * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(b.r * 0.7, -b.r * 0.55);
+    ctx.lineTo(b.r * 1.05, -b.r * 1.25);
+    ctx.lineTo(b.r * 0.3, -b.r * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    // The Sovereign wears a gold crown.
+    if (isSovereign) {
+      ctx.fillStyle = PALETTE.bossGold;
+      ctx.beginPath();
+      ctx.moveTo(-b.r * 0.45, -b.r * 0.85);
+      ctx.lineTo(-b.r * 0.3, -b.r * 1.25);
+      ctx.lineTo(-b.r * 0.12, -b.r * 0.9);
+      ctx.lineTo(0, -b.r * 1.3);
+      ctx.lineTo(b.r * 0.12, -b.r * 0.9);
+      ctx.lineTo(b.r * 0.3, -b.r * 1.25);
+      ctx.lineTo(b.r * 0.45, -b.r * 0.85);
+      ctx.closePath();
+      ctx.fill();
+    }
+    // Spiky body.
+    ctx.fillStyle = PALETTE.boss;
+    ctx.beginPath();
+    const spikes = 10;
+    for (let i = 0; i <= spikes * 2; i++) {
+      const a = (i / (spikes * 2)) * Math.PI * 2;
+      const rr = (i % 2 === 0 ? b.r : b.r * 0.66) * pulse;
+      const px = Math.cos(a) * rr;
+      const py = Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // Hurt flash: the body goes pale right after a hit lands.
+    if (b.hurtT > 0.35) {
+      ctx.globalAlpha = 0.45;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, b.r * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+    // Angry eyes.
+    const ex = b.r * 0.34;
+    const ey = -b.r * 0.1;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(-ex, ey, b.r * 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex, ey, b.r * 0.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffd60a';
+    ctx.beginPath(); ctx.arc(-ex, ey, b.r * 0.11, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(ex, ey, b.r * 0.11, 0, Math.PI * 2); ctx.fill();
+    // Grinning mouth.
+    ctx.strokeStyle = PALETTE.bossCore;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, b.r * 0.28, b.r * 0.3, Math.PI * 0.15, Math.PI * 0.85);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // An expanding shockwave ring.
+  _ring(r) {
+    const { ctx } = this;
+    const a = Math.max(0, 1 - r.age / r.life);
+    ctx.globalAlpha = a;
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 3 + 3 * a;
+    ctx.beginPath();
+    ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   _powerup(p) {
     const { ctx } = this;
     const color = p.type === 'shield' ? PALETTE.shield
-      : p.type === 'magnet' ? PALETTE.magnet : PALETTE.slow;
+      : p.type === 'magnet' ? PALETTE.magnet
+      : p.type === 'slow' ? PALETTE.slow
+      : p.type === 'life' ? PALETTE.life : PALETTE.nova;
+    const letter = p.type === 'shield' ? 'S'
+      : p.type === 'magnet' ? 'M'
+      : p.type === 'slow' ? 'T'
+      : p.type === 'life' ? '♥' : '✦';
     const blink = p.life - p.age < 3 ? (Math.sin(p.age * 10) > 0 ? 1 : 0.4) : 1;
     const bob = Math.sin(p.phase) * 3;
     const glowColor = p.type === 'shield' ? 'rgba(125,215,255,0.5)'
-      : p.type === 'magnet' ? 'rgba(255,209,102,0.5)' : 'rgba(179,136,255,0.5)';
+      : p.type === 'magnet' ? 'rgba(255,209,102,0.5)'
+      : p.type === 'slow' ? 'rgba(179,136,255,0.5)'
+      : p.type === 'life' ? 'rgba(125,255,158,0.5)' : 'rgba(255,255,255,0.55)';
     ctx.globalAlpha = blink;
     this._glow(p.x, p.y + bob, p.r * 3, glowColor, 0.5);
     ctx.globalAlpha = blink;
@@ -194,7 +395,7 @@ export class Renderer {
     ctx.font = 'bold 15px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(p.type === 'shield' ? 'S' : p.type === 'magnet' ? 'M' : 'T', 0, 1);
+    ctx.fillText(letter, 0, 1);
     ctx.restore();
     ctx.globalAlpha = 1;
   }
@@ -334,11 +535,32 @@ export class Renderer {
     }
     ctx.globalAlpha = 1;
 
-    // Combo meter (below the score).
+    // Boss health bar (top-centre, under the wave text).
+    if (world.boss && world.state === 'playing') {
+      const b = world.boss;
+      const bw = 240;
+      const bx = w / 2 - bw / 2;
+      const by = 48;
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = PALETTE.danger;
+      ctx.fillText(b.type === 'warden' ? 'GLOOM WARDEN' : 'UMBRAL SOVEREIGN', w / 2, by - 6);
+      ctx.fillStyle = 'rgba(255,93,143,0.25)';
+      ctx.fillRect(bx, by, bw, 9);
+      ctx.fillStyle = PALETTE.danger;
+      ctx.fillRect(bx, by, bw * (b.hp / b.maxHp), 9);
+      ctx.strokeStyle = 'rgba(234,242,255,0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, bw, 9);
+    }
+
+    // Combo meter (below the score). It pops a little bigger each time
+    // the multiplier rises.
     if (world.combo > 1 && world.state === 'playing') {
       const frac = world.comboTimer / CONFIG.comboWindow;
+      const pop = 1 + world.comboPulse * 0.25;
       ctx.textAlign = 'left';
-      ctx.font = 'bold 20px "Segoe UI", system-ui, sans-serif';
+      ctx.font = `bold ${Math.round(20 * pop)}px "Segoe UI", system-ui, sans-serif`;
       ctx.fillStyle = PALETTE.shard;
       ctx.fillText(`COMBO x${world.multiplier}  (${world.combo})`, 18, 92);
       ctx.fillStyle = 'rgba(255,209,102,0.25)';
@@ -415,9 +637,10 @@ export class Renderer {
     ctx.fillStyle = PALETTE.text;
     ctx.font = '17px "Segoe UI", system-ui, sans-serif';
     ctx.fillText('MOVE  ·  WASD / Arrows / Mouse', w / 2, h * 0.52);
-    ctx.fillText('DASH  ·  Space or Click  (brief shield while dashing)', w / 2, h * 0.52 + 28);
+    ctx.fillText('DASH  ·  Space or Click  (brief shield while dashing — dash THROUGH wisps to destroy them)', w / 2, h * 0.52 + 28);
     ctx.fillText('COLLECT shards to build a combo — reach WAVE 10 to bring the DAWN', w / 2, h * 0.52 + 56);
-    ctx.fillText('Grab S (shield), M (magnet) and T (slow time) power-ups', w / 2, h * 0.52 + 84);
+    ctx.fillText('Grab S (shield), M (magnet), T (slow time), ♥ (life) and ✦ (nova) power-ups', w / 2, h * 0.52 + 84);
+    ctx.fillText('Beware the GLOOM WARDEN at Wave 5 — and the UMBRAL SOVEREIGN at Wave 10', w / 2, h * 0.52 + 112);
     const pulse = 0.65 + Math.sin(world.time * 4) * 0.35;
     ctx.globalAlpha = pulse;
     ctx.fillStyle = '#ffffff';

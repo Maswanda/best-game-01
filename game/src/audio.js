@@ -7,6 +7,8 @@ export class SoundBank {
     this.muted = false;
     this.musicTimer = null;
     this.musicStep = 0;
+    this.tempo = 420;      // ms per music beat; quickens as waves rise
+    this.mode = 'calm';    // 'calm' | 'boss'
   }
 
   // Must be called from a user gesture (Enter, click, keypress).
@@ -75,6 +77,85 @@ export class SoundBank {
     this.blip(base * 2, base * 2.4, 0.08, 'triangle', 0.07, 0.02);
   }
 
+  dashKill() {
+    this.blip(700, 1500, 0.09, 'triangle', 0.16);
+    this.noise(0.08, 3200, 0.08, 0, 'bandpass');
+  }
+
+  chip() {
+    this.blip(500, 240, 0.1, 'square', 0.12);
+    this.noise(0.06, 2000, 0.1, 0, 'bandpass');
+  }
+
+  split() {
+    this.blip(600, 900, 0.07, 'triangle', 0.12);
+    this.blip(600, 900, 0.07, 'triangle', 0.12, 0.06);
+  }
+
+  charge() {
+    this.noise(0.3, 900, 0.12, 0, 'bandpass');
+    this.blip(180, 520, 0.28, 'sawtooth', 0.06);
+  }
+
+  bossSpawn() {
+    this.blip(110, 55, 0.7, 'sawtooth', 0.2);
+    this.noise(0.5, 240, 0.25, 0, 'lowpass');
+  }
+
+  bossHit() {
+    this.blip(140, 60, 0.2, 'sawtooth', 0.2);
+    this.noise(0.16, 500, 0.22, 0, 'lowpass');
+  }
+
+  bossDie() {
+    [523, 392, 330, 262, 196].forEach((f, i) => this.blip(f, f * 0.94, 0.25, 'triangle', 0.15, i * 0.09));
+    this.noise(0.5, 300, 0.3, 0.1, 'lowpass');
+  }
+
+  nova() {
+    this.blip(400, 1600, 0.4, 'sine', 0.14);
+    this.noise(0.4, 1200, 0.2, 0.05, 'bandpass');
+    this.noise(0.3, 300, 0.25, 0.15, 'lowpass');
+  }
+
+  lifeUp() {
+    [523, 659, 784, 1047].forEach((f, i) => this.blip(f, f, 0.14, 'triangle', 0.14, i * 0.07));
+  }
+
+  orbBurst() {
+    this.noise(0.18, 1400, 0.1, 0, 'bandpass');
+    this.blip(300, 180, 0.12, 'sine', 0.08);
+  }
+
+  summon() {
+    this.blip(220, 110, 0.3, 'sawtooth', 0.1);
+    this.noise(0.2, 800, 0.1, 0, 'bandpass');
+  }
+
+  // The music quickens as the waves rise. Restarts the loop when the
+  // tempo actually changes so the new beat applies at once.
+  setIntensity(wave) {
+    const tempo = Math.max(300, 420 - (wave - 1) * 12);
+    if (tempo === this.tempo) return;
+    this.tempo = tempo;
+    this._restartMusic();
+  }
+
+  // Boss fights switch the pad to a lower, tenser minor loop with a
+  // heartbeat thud; clearing the boss returns to the calm loop.
+  setBossMode(on) {
+    const mode = on ? 'boss' : 'calm';
+    if (mode === this.mode) return;
+    this.mode = mode;
+    this._restartMusic();
+  }
+
+  _restartMusic() {
+    if (!this.musicTimer) return;
+    this.stopMusic();
+    this.startMusic();
+  }
+
   dash() {
     this.noise(0.22, 2600, 0.16, 0, 'bandpass');
     this.blip(300, 900, 0.14, 'sine', 0.08);
@@ -110,17 +191,24 @@ export class SoundBank {
   }
 
   // A slow, quiet pad that drifts under the game. One soft note per beat,
-  // cycling a calm minor arpeggio. Start/stop with the game state.
+  // cycling a calm minor arpeggio; boss mode drops it to a lower, tenser
+  // loop with a heartbeat thud. Start/stop with the game state.
   startMusic() {
     if (!this.ctx || this.musicTimer) return;
-    const scale = [220, 261.6, 329.6, 392, 440, 523.3];
+    const scale = this.mode === 'boss'
+      ? [196, 233.1, 261.6, 311.1, 349.2, 392]
+      : [220, 261.6, 329.6, 392, 440, 523.3];
+    const tempo = this.tempo;
     this.musicTimer = setInterval(() => {
       if (this.muted || !this.ctx) return;
       const f = scale[this.musicStep % scale.length];
-      this.blip(f, f, 0.9, 'sine', 0.035);
+      this.blip(f, f, 0.9, 'sine', this.mode === 'boss' ? 0.045 : 0.035);
       if (this.musicStep % 4 === 2) this.blip(f / 2, f / 2, 1.4, 'sine', 0.025);
+      if (this.mode === 'boss' && this.musicStep % 2 === 0) {
+        this.blip(98, 98, 0.5, 'triangle', 0.05);
+      }
       this.musicStep++;
-    }, 420);
+    }, tempo);
   }
 
   stopMusic() {

@@ -58,6 +58,9 @@ requestAnimationFrame(frame);
 window.__lumen = {
   state: () => world.debug(),
   damage: () => world.debugDamage(),
+  bossHit: () => world.debugBossHit(),
+  setWave: (w) => world.debugSetWave(w),
+  givePowerup: (t) => world.debugGivePowerup(t),
   nearWin: () => world.debugNearWin(),
   start: () => { sound.ensure(); world.startRun(); },
 };
